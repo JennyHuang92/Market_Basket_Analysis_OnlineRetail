@@ -1,0 +1,374 @@
+---
+title: "Market Basket Analysis Notebook by SH"
+output: html_notebook
+---
+
+Install required Packages
+```{r}
+#install.packages("RCurl")
+#install.packages("xlsx")
+#install.packages("plyr")
+```
+
+
+Import Packages
+```{r}
+# Load the libraries
+library(Matrix)
+library(arules)
+library(arulesViz)
+library(datasets)
+library(httr)
+library(jsonlite)
+library(RCurl)
+#library(xlsx) # has dependency on the 'rJava' package requiring Java to be installed
+library(readxl)
+library(tidyverse)
+library(knitr)
+library(ggplot2)
+library(lubridate)
+library(tidyr)
+library(dplyr)
+library(plyr)
+```
+
+Load Data from UCI repository
+```{r}
+############################################################
+# Read in the dataset
+retail <- read_excel("C:/Users/ac27802/Desktop/Market_Basket_Analysis_OnlineRetail/data/Online Retail.xlsx")
+head(retail)
+
+summary(retail)
+glimpse(retail)
+
+###########################################################
+```
+
+```{r}
+#Convert and edit Quantity into numeric
+Quantity <- as.numeric(retail$Quantity)
+glimpse(retail)
+
+```
+
+
+
+
+```{r}
+
+# Check dataframe shape
+
+nrow(retail)
+ncol(retail)
+
+# Check to see missing values
+
+sum(is.na(retail)) #total number of missing values is 136534
+colSums(is.na(retail)) #further check to see where these missing values fall under what columns
+
+
+# Return dataframe using complete.cases which returns a logical vector with cases that are complete, i.e., no missing value.
+#sum(complete.cases(retail))
+retail <- retail[complete.cases(retail), ] # remove missing values 
+
+
+# Use gsub() to remove quotes from the description column to avoid error -EOF within quoted stringWarning: EOF within quoted stringWarning:
+retail$Description <- gsub('"', '', retail$Description)
+
+```
+```{r}
+# Recheck dataframe shape after removing missing values
+
+nrow(retail)
+ncol(retail)
+```
+
+
+
+Transform data into a transaction data format in order for arules to read (one row per transaction) 
+```{r}
+# select only description and invoiceNo columns 
+
+retail_selected <- retail %>%
+  select(InvoiceNo, Description)
+retail_selected
+
+# count number of unique rows in a column
+n_distinct(retail_selected$InvoiceNo) # we are seeing 22190 unique invoices/transactions
+
+# Collapse description column into one row per transaction
+#ddply(dataframe, variables_to_be_used_to_split_data_frame, function_to_be_applied)
+retail_new <- ddply(retail_selected
+                     , .(InvoiceNo) #columns you want to split the data frame by
+                     , summarize
+                     , Description_collapsed = paste(Description, collapse=",")
+)
+
+retail_new
+
+head(retail_new, 3)
+
+summary(retail_new)
+#glimpse(retail_new)
+
+
+```
+
+
+Export new dataframe as CSV into directory
+```{r}
+# append If FALSE, will overwrite existing file. If TRUE, will append to existing file.
+
+write.csv(retail_new,"C:/Users/ac27802/Desktop/Market_Basket_Analysis_OnlineRetail/data/market_basket_formatted_transactions.csv", quote = FALSE, append= FALSE, row.names = FALSE)
+```
+
+
+
+Read in new formatted 'transaction' data
+```{r}
+# To find association rule with arules package, the data needs to be reformatted in 'transaction' format - each row contains the items in the cart 
+# Skip the columns name in the first line
+transaction <- read.transactions("C:/Users/ac27802/Desktop/Market_Basket_Analysis_OnlineRetail/data/market_basket_formatted_transactions.csv", format="basket", sep=",", skip =1)
+#inspect(head(transaction, 4))
+
+```
+
+
+Transaction Data Summary
+```{r}
+# transaction data summary
+summary(transaction)
+
+```
+
+
+```{r}
+#number of carts
+length(transaction) # we are seeing 22190 unique transactions in the data
+
+# Show the numbers of frequency themselves (what fraction of carts have the item) percentage of the carts contains that item
+# itemFrequency(transaction) # every items in the cart 
+
+head(itemFrequency(transaction)) # show first 6 items (supports) alphabetically
+# item "color spaceboy pen" appears in 0.8% of all carts 
+
+
+# look for particular items by position or by name
+# what is the 4th item in the vector? #support of 4th item alphabetically
+itemFrequency(transaction)[4] 
+
+# what fraction of the cart has WHITE HANGING HEART T-LIGHT HOLDER? 8%
+itemFrequency(transaction)["WHITE HANGING HEART T-LIGHT HOLDER"] 
+
+# get the item labels across the entire transaction dataset
+#itemLabels(transaction) 
+
+# find the position of the item / pattern
+grep("WHITE HANGING HEART T-LIGHT HOLDER", itemLabels(transaction)) # as seen below are the positions occurred in the vector with this item --WHITE HANGING HEART T-LIGHT HOLDER
+
+# show the frequencies of all those items contain "WHITE HANGING HEART T-LIGHT HOLDER"
+#itemFrequency(transaction)[grep("WHITE HANGING HEART T-LIGHT HOLDER", itemLabels(transaction))]
+
+```
+
+
+```{r}
+#Inspect subset of the data (one or the other or both); use %in% shortcut
+#SUB <- subset(transaction, items %in% c("WHITE HANGING HEART T-LIGHT HOLDER", "ASSORTED COLOUR BIRD ORNAMENT"))
+#inspect(SUB[c(12, 10, 5)])
+
+# soda AND grape; use %ain% shortcut (ONLY works for transactions)
+#SUB2 <- subset(transaction, items %ain% c("WHITE HANGING HEART T-LIGHT HOLDER", "ASSORTED COLOUR BIRD ORNAMENT"))
+#inspect(SUB[c(26, 18)])
+
+```
+
+
+
+Creating frequency plot to get top sold items
+```{r}
+# Create an item frequency plot for the top 20 items
+
+itemFrequencyPlot(transaction,topN=20,type="relative", main="Relative Item Frequency Plot")
+itemFrequencyPlot(transaction,topN=20,type="absolute", horiz=FALSE, main="Absolute Item Frequency Plot")
+itemFrequencyPlot(transaction,topN=20,type="absolute", horiz=TRUE, main="Absolute Item Frequency Plot")
+```
+
+
+#####################################################################
+Apriori Algorithm
+
+As for summary below, we can see that 49676 rules are generated and a length of 5 items has the most rules. Below are some explanation of the rule itself. 
+
+Support 0.001 - The below rules applies at least 0.1% of carts must contain all items involved in the rule, which shows how prevelant this rule is in general
+
+confidence of at least 80% (of the carts that contain the items in the LHS part of rule, at least 80% also have the item in the RHS of the rule, the rule is correct for at least 80% of carts)
+
+minimum length of 2 (at least one item in the LHS and one item in the RHS)
+maximum length of 8 (max seven items in the LHS and one item in the RHS)
+
+
+```{r}
+# Apply Apriori in selecting rules
+rules <- apriori(transaction, parameter = list(supp=0.001, conf = 0.8, minlen=2, maxlen=8)
+                 , control = list(verbose=FALSE)
+                 )
+rules
+summary(rules)
+
+# show the top 5 rules, but only 2 digits
+options(digits=2) #changes the number of digits printed to the screen to 2
+inspect(rules[1:5])
+```
+#####################################################################
+
+Generating Rules using Apriori to mine frequent itemsets and association rules.
+
+coverage = fraction of baskets that have all items in the LHS of rule
+count = #baskets that satisfy rule ( have all items referenced in rule)
+confidence : given the item on the LHS of rule, we are % confident that we see item on the RHS (posterior probability that cart has item on RHS given it has all items on LHS of rule )
+Support = fraction of baskets that satisfy rule or fraction of baskets that have all items referenced in rule
+lift: how many times more likely that item in RHS appears in a cart when it contains all items in LHS
+#####################################################################
+
+
+Further inspect rules and sorting by quality measure
+```{r}
+inspect(sort(rules, by="lift", decreasing = TRUE)[1:10])
+inspect(sort(rules, by="confidence", decreasing = TRUE)[1:10])
+inspect(sort(rules, by="support", decreasing = TRUE)[1:10])
+
+```
+
+#####################################################################
+Here is some interpretation of the rules
+
+We are seeing 28 carts contained wobbly chicken and decoration and 0.1% fractional of the cart that this rule applied (support). We're 100% confident. Meaning if we going to look at all the transactions that has wobbly chicken, 100 % of them would have decoration. 
+
+We can also see that the itemFrequency (metric of support) shows the prior probability of finding the item and the confidence shows the posterior probability of finding the item given the existing items on the LHS of the rule. 
+
+
+```{r}
+itemFrequency(transaction)["DECORATION"] # this is the prior probability of finding decoration in the cart 0.2% -- means support
+
+# so if the cart contains wobbly chicken, the probability of finding decoration is going to increase by a factor of 444 (444 times higher)
+
+itemFrequency(transaction)["DECORATION"]  * 444  # the result of this turns out to be the confident of the rule 1 
+```
+```{r}
+inspect(head(transaction, 4))
+```
+
+
+Questions that we can answer using APRIORI algorithms
+
+1. What are customers likely to buy AFTER they purchase WHITE HANGING HEART T-LIGHT HOLDER, since this item has the highest frequency?
+```{r}
+
+rules<-apriori(transaction, parameter=list(supp=0.001,conf = 0.08, minlen=2), 
+               appearance = list(default="rhs",lhs="WHITE HANGING HEART T-LIGHT HOLDER"),
+               control = list(verbose=FALSE))
+rules<-sort(rules, decreasing=TRUE, by="confidence")
+summary(rules)
+inspect(rules[1:5])
+
+```
+
+2.What are customers likely to buy BEFORE they purchase WHITE HANGING HEART T-LIGHT HOLDER
+
+```{r}
+
+rules<-apriori(transaction, parameter=list(supp=0.001,conf = 0.08), 
+               appearance = list(default="lhs",rhs="WHITE HANGING HEART T-LIGHT HOLDER"),
+               control = list(verbose=FALSE))
+rules<-sort(rules, decreasing=TRUE,by="confidence")
+inspect(rules[1:5])
+```
+
+#####################################################################
+Visualizing Rules
+
+1. Interactive plot
+To see if there's any hidden associations or relationships among the rules (i.e. clusters of the rules that we may not discover just by looking at the list)
+```{r}
+#####################################################################
+# We probably don't want to visualize too many rules to cloud the image but enough to show the relationships among the rules, we are going to refit the algorithms here
+
+simplerules <- apriori(transaction, parameter=list(supp=0.001,conf= 0.7,maxlen=3), control = list(verbose=F))
+
+length((simplerules)) # we have ~5K rules in this scenario
+
+
+#####################################################################
+#select 10 rules from simple rules having the highest confidence.
+
+top10simplerules <- head(simplerules, n = 10, by = "confidence")
+
+#simplerules <- sort(simplerules, by = "lift")[c(1:13, 22:23, 98)] #selecting some for illustration
+#plot(simplerules, method="graph", edgeCol="black", cex=0.7, alpha=1) # non-interactive
+plot(top10simplerules, method="graph", engine="htmlwidget") # non-interactive
+
+# Arrows pointing to rule are items in the LHS("if"), arrow leaving the rule point to item in the RHS ("then")
+
+#####################################################################
+
+
+saveAsGraph(head(simplerules, n = 1000, by = "lift"), file = "simplerules_1000.graphml")
+
+```
+
+
+2. Scatter plot
+It uses Support and Confidence on the axes. Lift is used by default to color (grey levels) of the points.
+The above plot shows that rules with high lift have low support. 
+```{r}
+# Filter rules with confidence greater than 0.4 or 40%
+
+subRules<-rules[quality(rules)$confidence>0.4]
+plot(subRules)
+```
+
+
+
+#####################################################################
+
+plot(rulesObject, measure, shading, method)
+
+
+rulesObject: the rules object to be plotted
+
+measure: Measures for rule interestingness. Can be Support, Confidence, lift or combination of these depending upon method value.
+
+shading: Measure used to color points (Support, Confidence, lift). The default is Lift.
+
+method: Visualization method to be used (scatterplot, two-key plot, matrix3D).
+
+```{r}
+plot(subRules,method="two-key plot")
+```
+
+The two-key plot uses support and confidence on x and y-axis respectively. It uses order for coloring. The order is the number of items in the rule.
+
+
+#####################################################################
+Individual Rule Representation (Parallel Coordinates Plot)
+
+To visualize which products along with which items cause what kind of sales.
+
+```{r}
+# Filter top 20 rules with highest lift
+subRules2<-head(subRules, n=20, by="lift")
+plot(subRules2, method="paracoord")
+```
+As can see from the topmost arrow. It shows that when I have 'WOODEN FRAME ANTIQUE WHITE' , 'RED HANGING HEART T_LIGHT HOLDER' and CANDLEHOLDER PINK HANGING HEART in my shopping cart, I am likely to buy 'WHITE HANDING HEART T-LIGHT HOLDER' along with these as well.
+
+
+
+
+
+
+
+
+
+
