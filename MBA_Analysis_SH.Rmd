@@ -1,0 +1,277 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+# Install packages & there's currently no official R wrapper for the Kaggle API. 
+
+
+#install.packages("arules")
+#install.packages("arulesViz")
+
+#install.packages("devtools") # Install devtools from CRAN
+#install.packages("mkearney/kaggler")
+#devtools::install_github("mkearney/kaggler")
+
+```
+
+```{r}
+version
+```
+
+
+
+```{r}
+# Load the libraries
+library(Matrix)
+library(arules)
+library(arulesViz)
+library(datasets)
+
+# Load the data set
+data(Groceries)
+inspect(head(Groceries, 4))
+head(Groceries)
+head(as(Groceries, "list"), 5)
+#summary(Groceries)
+```
+
+
+```{r}
+# Create an item frequency plot for the top 20 items
+itemFrequencyPlot(Groceries,topN=20,type="relative")
+itemFrequencyPlot(Groceries,topN=20,type="absolute", horiz=TRUE)
+```
+
+
+```{r}
+# Subsets
+
+# soda OR grape (one or the other or both); use %in% shortcut
+SUB <- subset(Groceries, items %in% c("grapes", "soda"))
+inspect(SUB[c(12, 10, 5)])
+
+# soda AND grape; use %ain% shortcut (ONLY works for transactions)
+SUB <- subset(Groceries, items %ain% c("grapes", "soda"))
+inspect(SUB[c(26, 18)])
+```
+
+
+
+
+```{r}
+head(itemFrequency(Groceries)) #first 6 supports alphabetically 
+itemFrequency(Groceries)[121] #support of 121st item alphabetically
+itemFrequency(Groceries)["soups"] #support of "soups"
+length(Groceries) #number of carts
+length(Groceries) * c(itemFrequency(Groceries)[121], itemFrequency(Groceries)["soups"]) #number of carts times support of item = number carts with that item
+grep("milk", itemLabels(Groceries)) # return the position of elements in vector contain "milk"
+itemFrequency(Groceries)[grep("milk", itemLabels(Groceries))]
+```
+```{r}
+rules <- apriori(Groceries, parameter = list(supp=0.001, conf = 0.8, minlen=2, maxlen=4)
+                 #, control = list(verbose=FALSE)
+                 )
+rules
+```
+
+
+
+```{r}
+# Get the rules 
+
+rules <- apriori(Groceries, parameter = list(supp=0.001, conf = 0.8))
+rules
+
+
+# show the top 5 rules, but only 2 digits
+options(digits=2) #changes the number of digits printed to the screen to 2
+inspect(rules[1:5])
+
+# confidence : given the item on the LHS of rule, we are % confident that we see item on the RHS (posterior probability that cart has item on RHS given it has all items on LHS of rule )
+# coverage = fraction of baskets that have all items in the LHS of rule
+# count = #baskets that satisfy rule ( have all items referenced in rule)
+# Support = fraction of baskets that satisfy rule or fraction of baskets that have all items referenced in rule
+# lift: how many times more likely that item in RHS appears in a cart when it contains all items in LHS
+```
+
+```{r}
+itemFrequency(Groceries)["bottled beer"] # gives you prior probability of finding bottle beer in cart
+itemFrequency(Groceries)["bottled beer"] * 11.2 #posterior probability of finding bottled beer in cart given it has both liquor and red/blush wine: 0.906 (11.24 times higher)
+
+```
+
+```{r}
+inspect(sort(rules, by="lift", decreasing = TRUE)[1:4])
+inspect(sort(rules, by="confidence", decreasing = TRUE)[1:4])
+inspect(sort(rules, by="support", decreasing = TRUE)[1:4])
+```
+
+
+
+```{r}
+# Statistical Significance of Rules
+inspect(head(rules, 7)) # first 7 rules
+head(is.significant(rules, transactions=Groceries), 7) #first 7 rules
+```
+
+
+
+
+```{r}
+# sorting rules with the most likely rules
+
+rules <- sort(rules, by="confidence", decreasing = TRUE)
+inspect(rules[1:5])
+
+```
+
+
+
+
+```{r}
+rules <- apriori(df, parameter = list(supp=0.001, conf = 0.8, maxlen=3))
+rules
+# show the top 5 rules, but only 2 digits
+rules <- sort(rules, by="confidence", decreasing = TRUE)
+inspect(rules[1:5])
+```
+
+
+```{r}
+#rules <- apriori(Groceries, parameter = list(supp = 0.01, conf = 0.5, target = "rules"))
+rules_lift <- sort(rules, by = 'lift')
+rules_pruned <- rules_lift[!is.redundant(rules_lift, measure="lift")]
+inspect(head(rules_pruned, 20))
+
+```
+
+
+```{r}
+# What are customers likely to buy before buying whole milk?
+rules<-apriori(data=df, parameter=list(supp=0.001,conf = 0.08), 
+               appearance = list(default="lhs",rhs="whole milk"),
+               control = list(verbose=FALSE))
+rules<-sort(rules, decreasing=TRUE,by="confidence")
+inspect(rules[1:5])
+```
+
+```{r}
+# What are customers likely to buy if they purchase whole milk?
+rules<-apriori(data=df, parameter=list(supp=0.001,conf = 0.15,minlen=2), 
+               appearance = list(default="rhs",lhs="whole milk"),
+               control = list(verbose=F))
+rules<-sort(rules, decreasing=TRUE,by="confidence")
+inspect(rules[1:5])
+
+```
+# Visualizations
+
+```{r}
+library(arulesViz)
+plot(rules,method="graph",engine = "interactive")
+```
+
+
+```{r}
+simplerules <- apriori(Groceries, parameter=list(supp=0.001,conf= 0.7,maxlen=3), control = list(verbose=F))
+simplerules <- sort(simplerules, by = "lift")[c(1:13, 22:23, 98)]
+plot(simplerules, method="graph", edgeCol="black", cex=0.7, alpha=1) #noninteractive
+plot(simplerules, method="graph", engine="htmlwidget") #noninteractive
+
+# Arrows pointing to rule are items in the LHS("if"), arrow leaving the rule point to item in the RHS ("then")
+
+```
+
+
+#GET data from an API using R in RStudio | Food Bank (without Key) 
+```{r}
+install.packages("httr")
+install.packages("jsonlite")
+install.packages("dotenv")
+library(dotenv)
+#load_dot_env("cred.env")
+```
+```{r}
+# create a get response to call the API
+
+foodbank <- httr::GET("https://www.givefood.org.uk/api/2/foodbanks/")
+
+# view API GET response result
+#str(foodbank)
+
+# view the main source of the data needed from the API - normally content 
+str(foodbank$content)
+
+```
+
+
+```{r}
+# Convert the raw content to text 
+
+foodbankcontent <- httr::content(foodbank, as="text")
+
+# view JSON string result
+str(foodbankcontent)
+
+# convert the JSON string to a dataframe and view data as a table
+
+foodbankJSON <- jsonlite::fromJSON(foodbankcontent)
+
+View(foodbankJSON)
+
+```
+
+#GET data from an API using R in RStudio | Job Search (with Key)
+```{r}
+# create a get response to call the API
+
+# user = Sys.getenv("REED_API_KEY") #read from other file 
+# add ?details=true at the end of URL
+
+jobsearch <- httr::GET("https://www.reed.co.uk/api/1.0/search?keywords=analyst&location=london&distancefromlocation=15?details=true", 
+            httr::authenticate(
+                  user= "eea2e249-0663-40e9-a440-2ed187f07908",
+                  password= "",
+                  type="basic"))
+
+# view API GET response result
+str(jobsearch)
+
+# view the main source of the data needed from the API - normally content 
+str(jobsearch$content)
+
+
+```
+
+```{r}
+# Convert the raw content to text 
+
+jobsearchcontent <- httr::content(jobsearch, as="text")
+
+# view JSON string result
+str(jobsearchcontent)
+
+# convert the JSON string to a dataframe and view data as a table
+
+jobsearchcontentJSON <- jsonlite::fromJSON(jobsearchcontent)
+
+View(jobsearchcontentJSON)
+View(jobsearchcontentJSON$results)
+```
+
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+
